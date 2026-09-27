@@ -1,8 +1,0 @@
-{
-	"modmenu.nameTranslation.hsn-optimizations": "HSN Optimizations",
-	"modmenu.descriptionTranslation.hsn-optimizations": "Client-side distance culling, particle budgets, and world render scale for Fabric 26.3. Sits next to Sodium.",
-	"key.category.hsn-optimizations.keys": "HSN Optimizations",
-	"key.hsn-optimizations.killswitch": "Master kill switch",
-	"key.hsn-optimizations.settings": "Open settings",
-	"key.hsn-optimizations.unbound": "Not bound"
-}
