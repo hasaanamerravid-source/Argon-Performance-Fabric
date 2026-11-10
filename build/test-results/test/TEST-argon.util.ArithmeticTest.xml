@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="argon.util.ArithmeticTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-10T10:07:21.955Z" hostname="RHA" time="0.077">
+  <properties/>
+  <testcase name="floorDiv, ceilDiv and floorMod agree with Math across the overflow edges" classname="argon.util.ArithmeticTest" time="0.011"/>
+  <testcase name="select is a pick whichever way the mask is driven" classname="argon.util.ArithmeticTest" time="0.009"/>
+  <testcase name="the masks match the plain comparisons they stand in for" classname="argon.util.ArithmeticTest" time="0.005"/>
+  <testcase name="min, max and clamp agree with Math at the edges, sign flips included" classname="argon.util.ArithmeticTest" time="0.016"/>
+  <testcase name="the divisors that make MIN_VALUE a special case still round correctly" classname="argon.util.ArithmeticTest" time="0.004"/>
+  <testcase name="the plain comparison helpers read the same as the operators" classname="argon.util.ArithmeticTest" time="0.005"/>
+  <testcase name="the division helpers round the way the doc says, not the way / truncates" classname="argon.util.ArithmeticTest" time="0.005"/>
+  <testcase name="ordering survives the full int range, including the subtraction overflow" classname="argon.util.ArithmeticTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

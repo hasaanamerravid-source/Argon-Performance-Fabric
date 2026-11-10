@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "argon",
+  "version": "${version}",
+  "name": "Argon",
+  "description": "Lite jigsaw layout and frame cadence for Minecraft 26.3 on Fabric and Quilt. Speeds up jigsaw structure layout and paces frames when Max Framerate is below 260. Does not change vanilla structure size or seeds.",
+  "authors": ["HasaanAmerRavid"],
+  "contact": {
+    "homepage": "https://github.com/hasaanamerravid-source/Argon-Performance-Fabric",
+    "sources": "https://github.com/hasaanamerravid-source/Argon-Performance-Fabric",
+    "issues": "https://github.com/hasaanamerravid-source/Argon-Performance-Fabric/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/argon/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["argon.Argon"]
+  },
+  "mixins": ["argon.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25"
+  }
+}
