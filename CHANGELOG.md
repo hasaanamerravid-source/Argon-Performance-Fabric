@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.1
+
+Structure layout and seeds are unchanged. This version removes the remaining vanilla shape work from the candidate path, halves the octree leaf footprint, and trims the frame clock.
+
+### Layout
+
+- The region shape, a piece's local free shape, and both candidate shapes are now deferred. `DeferredShape` carries the box and builds `Shapes.create(box)` only if a call reaches vanilla. Argon's own test and record wraps answer from the octree, so a candidate no longer allocates an `ArrayVoxelShape` and its three coordinate lists just to have them discarded. The seed's two shapes are deferred the same way.
+- `BoxOctree` leaves hold six ints per box with an inclusive maximum instead of six doubles with a widened half-open maximum. This halves the leaf array and removes the int-to-double conversion on insert and the deflated doubles on the leaf scan. The 0.25 deflate is the inclusive cell test for integer boxes, so the hot query compares the candidate's `BoundingBox` ints directly. A piece at `Integer.MAX_VALUE` still fits without widening, and the coordinate-limit test still covers it.
+- A node subdivides when the leaf is full rather than one insertion later, so the 32-box array that used to be copied and then discarded is never allocated.
+- The child array is sized to the axes that actually split (two, four, or eight slots) instead of always eight.
+- `intersectsAnyBox` stays a half-open query for fractional callers and tests, but it is no longer on the layout path.
+
+### Frame Cadence
+
+- The cached interval is rounded to the nearest nanosecond instead of truncated.
+- `waitUntil` returns the clock reading that showed the deadline, and the jitter estimate uses it, so a paced frame reads the clock one fewer time.
+
+### Build
+
+- Version is `0.3.1`. The installed jar is `argon-0.3.1.jar`, and the F3 brand line reports `0.3.1+26.3`.
+
+### Tests
+
+- Added `DeferredShapeTest`, which checks the carrier against `Shapes.create` for a world-space box and for a box inside the unit cube, including the memoised resolution.
+- Added a fractional half-open probe test against the new integer leaf storage, and extended the coordinate-limit test to the half-open query at `Integer.MAX_VALUE`.
+- The mixin injection test now covers the two seed and three Placer `Shapes.create` call sites as well.
+
 ## 0.3.0
 
 Structure layout and seeds are unchanged. This version is edge-case correctness, thin-region layout performance, and improvements in reliability.

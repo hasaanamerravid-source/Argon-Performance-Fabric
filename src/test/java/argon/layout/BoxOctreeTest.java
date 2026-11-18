@@ -291,6 +291,8 @@ class BoxOctreeTest {
             "a candidate sharing a cell has to be rejected");
         assertTrue(tree.hasRoomFor(new BoundingBox(max - 7, 8, 0, max, 15, 7)),
             "a candidate one cell up has to be accepted");
+        assertTrue(tree.intersectsAnyBox(max, 0.0D, 0.0D, max + 1.0D, 8.0D, 8.0D),
+            "the half-open probe at the coordinate limit has to find the piece");
     }
 
     @Test
@@ -325,6 +327,18 @@ class BoxOctreeTest {
         assertFalse(tree.hasRoomFor(box));
         assertFalse(tree.hasRoomFor(new BoundingBox(15, 15, 15, 25, 25, 25)));
         assertTrue(tree.hasRoomFor(new BoundingBox(21, 21, 21, 25, 25, 25)));
+    }
+
+    @Test
+    @DisplayName("a fractional probe keeps the half-open answer after integer storage")
+    void fractionalProbeUsesHalfOpenBounds() {
+        BoxOctree tree = new BoxOctree(region());
+        tree.addBox(new BoundingBox(0, 0, 0, 0, 0, 0));
+
+        assertTrue(tree.intersectsAnyBox(0.75D, 0.0D, 0.0D, 1.0D, 1.0D, 1.0D), "inside the cell");
+        assertTrue(tree.intersectsAnyBox(-0.25D, 0.0D, 0.0D, 0.25D, 1.0D, 1.0D), "over the low face");
+        assertFalse(tree.intersectsAnyBox(1.0D, 0.0D, 0.0D, 2.0D, 1.0D, 1.0D), "the next cell is free");
+        assertFalse(tree.intersectsAnyBox(-1.0D, 0.0D, 0.0D, 0.0D, 1.0D, 1.0D), "the previous cell is free");
     }
 
     @Test

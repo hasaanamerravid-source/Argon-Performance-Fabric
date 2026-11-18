@@ -81,8 +81,8 @@ public final class FrameCadence {
             target = now;
         }
 
-        waitUntil(target);
-        long error = Math.abs(System.nanoTime() - target);
+        long released = waitUntil(target);
+        long error = released - target;
         jitterEma += (error - jitterEma) >> 3;
         pacing = true;
         last = target;
@@ -92,16 +92,24 @@ public final class FrameCadence {
         if (fps == lastLimit) {
             return;
         }
-        cachedInterval = ONE_SECOND / fps;
+        // Round to the nearest nanosecond rather than truncating. A cap that does not divide one
+        // second exactly would otherwise run a fraction of a nanosecond short on every frame, and
+        // the error is free to remove.
+        cachedInterval = (ONE_SECOND + fps / 2L) / fps;
         last = now;
         lastLimit = fps;
         spinWindow = SPIN_CEILING;
     }
 
-    private static void waitUntil(long target) {
+    /**
+     * Waits until the target and returns the clock reading that showed it. The caller measures its
+     * jitter from that reading, so a paced frame costs one clock read in the wait and none after
+     * it instead of one more.
+     */
+    private static long waitUntil(long target) {
         long time = System.nanoTime();
         if (time >= target) {
-            return;
+            return time;
         }
         long spinAt = target - spinWindow;
         // parkNanos returns immediately while the interrupt flag is set, which used to turn the
@@ -118,8 +126,8 @@ public final class FrameCadence {
             Thread.currentThread().interrupt();
         }
         if (time >= target) {
-            widen(System.nanoTime() - target);
-            return;
+            widen(time - target);
+            return time;
         }
         long spinStart = time;
         while (time < target) {
@@ -127,6 +135,7 @@ public final class FrameCadence {
             time = System.nanoTime();
         }
         narrow(spinWindow - (time - spinStart));
+        return time;
     }
 
     private static void widen(long overshoot) {

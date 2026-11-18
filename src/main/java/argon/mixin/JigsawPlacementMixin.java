@@ -1,6 +1,7 @@
 package argon.mixin;
 
 import argon.layout.BoxOctree;
+import argon.layout.DeferredShape;
 import argon.layout.TrojanVoxelShape;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -22,12 +23,24 @@ import org.spongepowered.asm.mixin.injection.At;
  * boundary and the centre piece goes in as the first placed box. Later joins then keep the carrier
  * and append, so the tree always holds every accepted piece.
  *
- * <p>The wrap answers only for that operator. A different one would mean the free region is no
- * longer the structure region minus the centre piece, and the tree has no answer to give, so the
- * call goes through to vanilla instead.
+ * <p>Both {@code Shapes.create} calls are deferred as well. The join is the only reader of either
+ * shape on this path, so building them first and then discarding the join result is pure loss; a
+ * deferred shape holds the box until something asks for the real shape, and Argon's join never
+ * does. If a different operator ever reached this call site the pair is resolved first, so vanilla
+ * receives exactly the shapes it would have built.
  */
 @Mixin(targets = "net.minecraft.world.level.levelgen.structure.pools.JigsawPlacement", remap = false)
 public class JigsawPlacementMixin {
+    @WrapOperation(
+        method = "lambda$addPieces$2",
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/shapes/Shapes;create(Lnet/minecraft/world/phys/AABB;)Lnet/minecraft/world/phys/shapes/VoxelShape;"),
+        require = 2,
+        remap = false
+    )
+    private static VoxelShape argon$deferSeedShape(AABB box, Operation<VoxelShape> original) {
+        return new DeferredShape(box);
+    }
+
     @WrapOperation(
         method = "lambda$addPieces$2",
         at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/shapes/Shapes;join(Lnet/minecraft/world/phys/shapes/VoxelShape;Lnet/minecraft/world/phys/shapes/VoxelShape;Lnet/minecraft/world/phys/shapes/BooleanOp;)Lnet/minecraft/world/phys/shapes/VoxelShape;"),
@@ -43,7 +56,7 @@ public class JigsawPlacementMixin {
         @Local(name = "box", argsOnly = true) @NonNull BoundingBox startBox
     ) {
         if (function != BooleanOp.ONLY_FIRST) {
-            return original.call(shape1, shape2, function);
+            return original.call(DeferredShape.resolve(shape1), DeferredShape.resolve(shape2), function);
         }
         TrojanVoxelShape shape = new TrojanVoxelShape(new BoxOctree(aabb));
         shape.boxOctree.addBox(startBox);

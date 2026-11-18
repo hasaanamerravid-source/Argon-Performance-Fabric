@@ -16,24 +16,29 @@ import org.jspecify.annotations.NonNull;
  * layout only ever asks about pieces inside the region, and a box that cannot reach it can never
  * overlap one that can.
  *
- * <p>Two things keep the hot path cheap. Leaf boxes are held as six doubles in one flat array
- * rather than as AABB objects, so a scan walks contiguous memory and never dereferences a box.
- * And a child is only created once some box actually reaches it, so the empty children a
+ * <p>Two things keep the hot path cheap. Leaf boxes are held as six ints in one flat array rather
+ * than as AABB objects or doubles, so a scan walks half the memory and completes in integer
+ * registers. And a child is only created once some box actually reaches it, so the empty children a
  * subdivision would otherwise reserve cost neither an object nor a boundary test per query.
  * Subdivision splits only the axes that are at least two blocks wide, so a flat or rod-shaped
  * region still gets a tree instead of a single leaf that every query scans linearly.
+ *
+ * <p>Piece boxes are integer block bounds. The stored maximum is inclusive, which keeps a piece at
+ * {@link Integer#MAX_VALUE} representable, and lets the query compare the candidate's own ints
+ * against the stored ones. The quarter-block deflate vanilla applies only matters between boxes
+ * that share a cell, and for integer bounds that is exactly the inclusive test: every deflate
+ * strictly between zero and one block gives the same answer.
  */
 public final class BoxOctree {
-    private static final int SUBDIVIDE_THRESHOLD = 16;
+    private static final int SUBDIVIDE_AT = 16;
     private static final int MAXIMUM_DEPTH = 5;
     private static final int INITIAL_LEAF = 4;
     private static final int STRIDE = 6;
-    private static final int MAX_CHILDREN = 8;
 
     private final double minX, minY, minZ, maxX, maxY, maxZ;
     private final int sizeX, sizeY, sizeZ;
     private final int depth;
-    private double[] inner;
+    private int[] inner;
     private int innerCount;
     private BoxOctree[] children;
     private int childCount;
@@ -58,7 +63,7 @@ public final class BoxOctree {
         this.sizeY = roundAwayFromZero(maxY - minY);
         this.sizeZ = roundAwayFromZero(maxZ - minZ);
         this.depth = parentDepth + 1;
-        this.inner = new double[INITIAL_LEAF * STRIDE];
+        this.inner = new int[INITIAL_LEAF * STRIDE];
     }
 
     private static int roundAwayFromZero(double value) {
@@ -69,16 +74,30 @@ public final class BoxOctree {
         return aMin < bMax && aMax > bMin;
     }
 
-    private boolean intersectsBoundary(double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
+    /** Whether this node's half-open boundary overlaps a half-open box. */
+    private boolean overlaps(double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
         return spans(minX, maxX, oMinX, oMaxX)
             && spans(minY, maxY, oMinY, oMaxY)
             && spans(minZ, maxZ, oMinZ, oMaxZ);
     }
 
+    /**
+     * Whether this node's half-open boundary shares a cell with an inclusive block box. The
+     * maximum is inclusive, so its half-open edge is {@code max + 1}; the addition is done in
+     * double so a box at {@link Integer#MAX_VALUE} does not wrap.
+     */
+    private boolean reaches(int oMinX, int oMinY, int oMinZ, int oMaxX, int oMaxY, int oMaxZ) {
+        return minX < oMaxX + 1.0D && maxX > oMinX
+            && minY < oMaxY + 1.0D && maxY > oMinY
+            && minZ < oMaxZ + 1.0D && maxZ > oMinZ;
+    }
+
     private boolean canSubdivide() {
+        // Subdivide before the leaf fills the array it would grow next. Otherwise the seventeenth
+        // box doubles a leaf that is about to be replaced by children and throws the copy away.
         return children == null
             && depth < MAXIMUM_DEPTH
-            && innerCount > SUBDIVIDE_THRESHOLD
+            && innerCount >= SUBDIVIDE_AT
             // A thin region can still be split along the axes that have room. Requiring all three
             // axes to be at least two blocks used to leave a flat structure with a single leaf and
             // a linear scan over every piece.
@@ -99,7 +118,9 @@ public final class BoxOctree {
         int stepsY = splitY ? 2 : 1;
         int stepsZ = splitZ ? 2 : 1;
         childCount = stepsX * stepsY * stepsZ;
-        children = new BoxOctree[MAX_CHILDREN];
+        // One slot per branching axis combination, not a fixed eight: a one- or two-axis split
+        // does not reserve slots it can never fill or walk them on every query.
+        children = new BoxOctree[childCount];
         childBounds = new double[childCount * STRIDE];
         int child = 0;
         for (int x = 0; x < stepsX; x++) {
@@ -138,22 +159,20 @@ public final class BoxOctree {
     }
 
     /**
-     * Piece bounds as the overlap test wants them. Reads the six values straight out of the
-     * BoundingBox, so nothing is allocated for the box that lands in the tree.
+     * Piece bounds as the overlap test wants them. The six values are the piece's own ints, with
+     * the maximum inclusive, so nothing is converted and the coordinate limit never has to be
+     * widened.
      */
     public void addBox(@NonNull BoundingBox box) {
-        // Widening before the +1 matters at Integer.MAX_VALUE: an int addition wraps negative there
-        // and the box is then rejected as if it did not reach the region at all.
-        addBox(box.minX(), box.minY(), box.minZ(),
-            box.maxX() + 1.0D, box.maxY() + 1.0D, box.maxZ() + 1.0D);
+        addBox(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
     }
 
-    private void addBox(double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
+    private void addBox(int oMinX, int oMinY, int oMinZ, int oMaxX, int oMaxY, int oMaxZ) {
         // A box that never reaches this node cannot be found through it: a query only descends
         // into a child whose boundary it reaches, and a subdivision would push the box into no
         // child at all. Refusing it here keeps the answer the same whether or not the node has
         // subdivided yet, instead of making the result depend on how full the tree happens to be.
-        if (!intersectsBoundary(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)) {
+        if (!reaches(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)) {
             return;
         }
         if (canSubdivide()) {
@@ -181,11 +200,11 @@ public final class BoxOctree {
         innerCount++;
     }
 
-    private boolean childReaches(int child, double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
+    private boolean childReaches(int child, int oMinX, int oMinY, int oMinZ, int oMaxX, int oMaxY, int oMaxZ) {
         int base = child * STRIDE;
-        return spans(childBounds[base], childBounds[base + 3], oMinX, oMaxX)
-            && spans(childBounds[base + 1], childBounds[base + 4], oMinY, oMaxY)
-            && spans(childBounds[base + 2], childBounds[base + 5], oMinZ, oMaxZ);
+        return childBounds[base] < oMaxX + 1.0D && childBounds[base + 3] > oMinX
+            && childBounds[base + 1] < oMaxY + 1.0D && childBounds[base + 4] > oMinY
+            && childBounds[base + 2] < oMaxZ + 1.0D && childBounds[base + 5] > oMinZ;
     }
 
     private BoxOctree child(int child) {
@@ -203,7 +222,7 @@ public final class BoxOctree {
         return node;
     }
 
-    private boolean alreadyHas(double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
+    private boolean alreadyHas(int oMinX, int oMinY, int oMinZ, int oMaxX, int oMaxY, int oMaxZ) {
         for (int i = 0; i < innerCount; i++) {
             int base = i * STRIDE;
             if (inner[base] == oMinX && inner[base + 1] == oMinY && inner[base + 2] == oMinZ
@@ -218,16 +237,21 @@ public final class BoxOctree {
         if ((innerCount + 1) * STRIDE <= inner.length) {
             return;
         }
-        double[] grown = new double[inner.length * 2];
+        int[] grown = new int[inner.length * 2];
         System.arraycopy(inner, 0, grown, 0, innerCount * STRIDE);
         inner = grown;
     }
 
     /**
-     * Whether the 0.25-deflated piece box has room: it lands inside the free region and misses
+     * Whether the candidate has room: its 0.25-deflated box lands inside the free region and misses
      * every piece already in the tree. This is the accept case, so callers that stand in for a
-     * reject predicate negate it. Takes the BoundingBox so the deflated query box never has to be
-     * built as an AABB.
+     * reject predicate negate it.
+     *
+     * <p>The deflated candidate is tested against the region, then the candidate's own ints are
+     * tested against the stored ones. The deflate only shrinks each face by a quarter of a block,
+     * and both boxes are integer aligned, so two boxes share a cell exactly when their inclusive
+     * ranges overlap. That removes the deflated query doubles and the six additions that built
+     * them from the leaf scan.
      */
     public boolean hasRoomFor(@NonNull BoundingBox box) {
         double deflate = PieceBoxes.OVERLAP_DEFLATE;
@@ -240,11 +264,40 @@ public final class BoxOctree {
         if (minX <= qMinX && maxX >= qMaxX
             && minY <= qMinY && maxY >= qMaxY
             && minZ <= qMinZ && maxZ >= qMaxZ) {
-            return !intersectsAnyBox(qMinX, qMinY, qMinZ, qMaxX, qMaxY, qMaxZ);
+            return !intersectsAnyPiece(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
         }
         return false;
     }
 
+    /** The inclusive-block form of the query, used for every piece test the layout makes. */
+    private boolean intersectsAnyPiece(int oMinX, int oMinY, int oMinZ, int oMaxX, int oMaxY, int oMaxZ) {
+        if (children != null) {
+            for (int child = 0; child < childCount; child++) {
+                BoxOctree node = children[child];
+                if (node != null
+                    && node.reaches(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)
+                    && node.intersectsAnyPiece(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        for (int i = 0; i < innerCount; i++) {
+            int base = i * STRIDE;
+            if (oMinX <= inner[base + 3] && oMaxX >= inner[base]
+                && oMinY <= inner[base + 4] && oMaxY >= inner[base + 1]
+                && oMinZ <= inner[base + 5] && oMaxZ >= inner[base + 2]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a half-open double box overlaps any stored piece. The layout itself uses
+     * {@link #hasRoomFor(BoundingBox)}; this is the general form and keeps the tree answerable for
+     * callers and tests that carry their own coordinates.
+     */
     public boolean intersectsAnyBox(double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
         if (oMaxX <= oMinX || oMaxY <= oMinY || oMaxZ <= oMinZ) {
             return false;
@@ -259,7 +312,7 @@ public final class BoxOctree {
         for (int child = 0; child < childCount; child++) {
             BoxOctree node = children[child];
             if (node != null
-                && node.intersectsBoundary(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)
+                && node.overlaps(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)
                 && node.intersectsAnyBox(oMinX, oMinY, oMinZ, oMaxX, oMaxY, oMaxZ)) {
                 return true;
             }
@@ -270,9 +323,9 @@ public final class BoxOctree {
     private boolean leavesIntersect(double oMinX, double oMinY, double oMinZ, double oMaxX, double oMaxY, double oMaxZ) {
         for (int i = 0; i < innerCount; i++) {
             int base = i * STRIDE;
-            if (spans(inner[base], inner[base + 3], oMinX, oMaxX)
-                && spans(inner[base + 1], inner[base + 4], oMinY, oMaxY)
-                && spans(inner[base + 2], inner[base + 5], oMinZ, oMaxZ)) {
+            if (oMinX < inner[base + 3] + 1.0D && oMaxX > inner[base]
+                && oMinY < inner[base + 4] + 1.0D && oMaxY > inner[base + 1]
+                && oMinZ < inner[base + 5] + 1.0D && oMaxZ > inner[base + 2]) {
                 return true;
             }
         }
@@ -305,9 +358,9 @@ public final class BoxOctree {
         }
         for (int i = 0; i < innerCount; i++) {
             int base = i * STRIDE;
-            if (x >= inner[base] && x < inner[base + 3]
-                && y >= inner[base + 1] && y < inner[base + 4]
-                && z >= inner[base + 2] && z < inner[base + 5]) {
+            if (x >= inner[base] && x <= inner[base + 3]
+                && y >= inner[base + 1] && y <= inner[base + 4]
+                && z >= inner[base + 2] && z <= inner[base + 5]) {
                 return true;
             }
         }

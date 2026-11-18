@@ -1,11 +1,13 @@
 package argon.mixin;
 
 import argon.debug.ArgonProfiler;
+import argon.layout.DeferredShape;
 import argon.layout.TrojanVoxelShape;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.NonNull;
@@ -23,6 +25,11 @@ import org.spongepowered.asm.mixin.injection.At;
  * <p>Both wraps also answer only for the operator vanilla uses at that call site. Any other
  * operator means the vanilla free-space algebra is not the one this tree models, so the call goes
  * through untouched instead of silently getting an answer the tree cannot justify.
+ *
+ * <p>The three {@code Shapes.create} calls in this method build shapes for the candidate test and
+ * for the accepted-piece join. Argon answers both from the octree, so the shapes are deferred and
+ * never built on this path. The per-piece {@code sourceFree} shape is deferred too; it is resolved
+ * on first use because that path is vanilla's.
  */
 @Mixin(targets = "net.minecraft.world.level.levelgen.structure.pools.JigsawPlacement$Placer", remap = false)
 public class JigsawPlacementPlacerMixin {
@@ -34,6 +41,16 @@ public class JigsawPlacementPlacerMixin {
      * is what the capture is keyed on.
      */
     private static final String CANDIDATE_BOX = "targetBB";
+
+    @WrapOperation(
+        method = "tryPlacingChildren",
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/shapes/Shapes;create(Lnet/minecraft/world/phys/AABB;)Lnet/minecraft/world/phys/shapes/VoxelShape;"),
+        require = 3,
+        remap = false
+    )
+    private static VoxelShape argon$deferPieceShape(AABB box, Operation<VoxelShape> original) {
+        return new DeferredShape(box);
+    }
 
     /**
      * Vanilla accepts on {@code !joinIsNotEmpty(free, deflated, ONLY_SECOND)}, so this wrap answers
@@ -54,7 +71,7 @@ public class JigsawPlacementPlacerMixin {
                                   @Local(name = CANDIDATE_BOX) @NonNull BoundingBox box) {
         ArgonProfiler.PIECES_TESTED.increment();
         if (op != BooleanOp.ONLY_SECOND || !(shape1 instanceof TrojanVoxelShape trojan)) {
-            return original.call(shape1, shape2, op);
+            return original.call(DeferredShape.resolve(shape1), DeferredShape.resolve(shape2), op);
         }
         ArgonProfiler.OCTREE_CHECKS_SAVED.increment();
         return !trojan.boxOctree.hasRoomFor(box);
@@ -72,7 +89,7 @@ public class JigsawPlacementPlacerMixin {
     private VoxelShape argon$recordPiece(VoxelShape shape1, VoxelShape shape2, BooleanOp op, Operation<VoxelShape> original,
                                          @Local(name = CANDIDATE_BOX) @NonNull BoundingBox box) {
         if (op != BooleanOp.ONLY_FIRST || !(shape1 instanceof TrojanVoxelShape trojan)) {
-            return original.call(shape1, shape2, op);
+            return original.call(DeferredShape.resolve(shape1), DeferredShape.resolve(shape2), op);
         }
         trojan.boxOctree.addBox(box);
         return shape1;
