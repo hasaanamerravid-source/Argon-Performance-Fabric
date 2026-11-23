@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+Maintenance release. No behavioral changes to layout or frame cadence; rebuilt against the current toolchain and dependency set.
+
+### Build
+
+- Version is `0.3.2`. The installed jar is `argon-0.3.2.jar`, and the F3 brand line reports `0.3.2+26.3`.
+
 ## 0.3.1
 
 Structure layout and seeds are unchanged. This version removes the remaining vanilla shape work from the candidate path, halves the octree leaf footprint, and trims the frame clock.

@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public final class Argon implements ModInitializer {
-    public static final String VERSION = "0.3.1+26.3";
+    public static final String VERSION = "0.3.2+26.3";
     public static final Logger LOGGER = LoggerFactory.getLogger("Argon");
 
     @Override
